@@ -65,7 +65,7 @@ except ImportError:
 DEFAULT_PROFILE_DIR = Path.home() / ".arena-chrome-profile"
 DEFAULT_OUTPUT_DIR = Path.home() / "arena-output"
 DEFAULT_STATE_FILE = Path.home() / ".hermes" / "skills" / "arena-image-gen" / "auth" / "state.json"
-ARENA_URL = "https://arena.ai/text/direct?model_a=max"
+ARENA_URL = "https://arena.ai/image/direct?model_a=max"
 
 
 def print_header():
@@ -171,6 +171,40 @@ def select_model(page, model="max"):
         return False
 
 
+def activate_image_mode(page):
+    """Click the Image button to ensure image generation mode."""
+    print("  Activating image mode...")
+    
+    image_button_selectors = [
+        "button:has-text('Image')",
+        "button[aria-label*='Image']",
+        "[data-testid='image-button']",
+        ".image-mode-button",
+    ]
+    
+    for selector in image_button_selectors:
+        try:
+            button = page.query_selector(selector)
+            if button and button.is_visible():
+                button.click()
+                time.sleep(1)
+                print("  Image mode activated")
+                return True
+        except Exception:
+            continue
+    
+    # Check if already in image mode (textarea exists with image-related placeholder)
+    textarea = page.query_selector("textarea")
+    if textarea:
+        placeholder = textarea.get_attribute('placeholder') or ""
+        if "image" in placeholder.lower() or "describe" in placeholder.lower():
+            print("  Image mode already active")
+            return True
+    
+    print("  Image mode button not found (continuing anyway)")
+    return True
+
+
 def enter_prompt(page, prompt):
     """Enter the image generation prompt."""
     print(f"  Entering prompt: {prompt[:50]}...")
@@ -274,7 +308,7 @@ def wait_for_generation(page, timeout_seconds=120):
                         try:
                             width = img.get_attribute('width') or "0"
                             height = img.get_attribute('height') or "0"
-                            if int(width) > 100 and int(height) > 100:
+                            if int(width) > 300 and int(height) > 300:
                                 print(f"  Image detected! ({width}x{height})")
                                 time.sleep(2)  # Wait a bit more for full load
                                 return True
@@ -306,7 +340,7 @@ def wait_for_generation(page, timeout_seconds=120):
 
 
 def download_images(page, output_dir):
-    """Download all generated images."""
+    """Download all generated images with size filtering."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -325,6 +359,8 @@ def download_images(page, output_dir):
         "[data-testid='generated-image']",
     ]
     
+    seen_srcs = set()  # Avoid duplicates
+    
     for selector in image_selectors:
         try:
             images = page.query_selector_all(selector)
@@ -332,58 +368,126 @@ def download_images(page, output_dir):
                 try:
                     # Get image source
                     src = img.get_attribute('src')
-                    if not src:
+                    if not src or src in seen_srcs:
                         continue
+                    seen_srcs.add(src)
                     
-                    # Skip small images (icons, avatars)
-                    width = img.get_attribute('width') or "0"
-                    height = img.get_attribute('height') or "0"
-                    if int(width) < 100 or int(height) < 100:
-                        continue
-                    
-                    # Download image
-                    if src.startswith('blob:') or src.startswith('data:image'):
-                        # Use page.evaluate to get image data
-                        img_data = page.evaluate(f"""
-                            () => {{
-                                const img = document.querySelector('{selector}');
-                                if (!img) return null;
-                                const canvas = document.createElement('canvas');
-                                canvas.width = img.naturalWidth;
-                                canvas.height = img.naturalHeight;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(img, 0, 0);
-                                return canvas.toDataURL('image/png');
-                            }}
-                        """)
+                    # Check image size via JavaScript (more reliable)
+                    try:
+                        size = page.evaluate("""
+                            (el) => ({
+                                naturalWidth: el.naturalWidth || 0,
+                                naturalHeight: el.naturalHeight || 0,
+                                displayWidth: el.offsetWidth || 0,
+                                displayHeight: el.offsetHeight || 0
+                            })
+                        """, img)
                         
-                        if img_data:
-                            # Convert base64 to bytes
+                        real_width = max(size['naturalWidth'], size['displayWidth'])
+                        real_height = max(size['naturalHeight'], size['displayHeight'])
+                        
+                        if real_width < 300 or real_height < 300:
+                            print(f"  Skipped small image ({real_width}x{real_height})")
+                            continue
+                    except Exception:
+                        # If can't check size, skip blob/data URLs (likely loading indicators)
+                        if src.startswith('blob:') or src.startswith('data:'):
+                            continue
+                    
+                    # Download blob images
+                    if src.startswith('blob:'):
+                        try:
+                            img_data = page.evaluate("""
+                                async (el) => {
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = el.naturalWidth;
+                                    canvas.height = el.naturalHeight;
+                                    const ctx = canvas.getContext('2d');
+                                    ctx.drawImage(el, 0, 0);
+                                    return canvas.toDataURL('image/png');
+                                }
+                            """, img)
+                            
                             import base64
-                            if ',' in img_data:
-                                img_data = img_data.split(',')[1]
-                            img_bytes = base64.b64decode(img_data)
+                            header, data = img_data.split(',', 1)
+                            img_bytes = base64.b64decode(data)
                             
-                            # Save image
-                            filename = f"arena_{timestamp}_{i+1}.png"
+                            filename = f"{timestamp}_image_{len(downloaded)+1}.png"
                             filepath = output_dir / filename
-                            
-                            with open(filepath, 'wb') as f:
-                                f.write(img_bytes)
-                            
+                            filepath.write_bytes(img_bytes)
                             downloaded.append(filepath)
-                            print(f"  Saved: {filepath}")
+                            print(f"  Saved: {filename}")
+                            
+                        except Exception as e:
+                            print(f"  Failed to save blob image: {e}")
                     
+                    # Download data URL images
+                    elif src.startswith('data:image'):
+                        try:
+                            import base64
+                            header, data = src.split(',', 1)
+                            img_bytes = base64.b64decode(data)
+                            
+                            filename = f"{timestamp}_image_{len(downloaded)+1}.png"
+                            filepath = output_dir / filename
+                            filepath.write_bytes(img_bytes)
+                            downloaded.append(filepath)
+                            print(f"  Saved: {filename}")
+                            
+                        except Exception as e:
+                            print(f"  Failed to save data URL: {e}")
+                    
+                    # Download regular URL images
                     else:
-                        # Regular image URL - use requests or page download
-                        print(f"  Skipping non-blob image: {src[:50]}...")
-                        
-                except Exception as e:
-                    print(f"  Error downloading image {i+1}: {e}")
-                    continue
+                        try:
+                            response = page.request.get(src)
+                            if response.ok:
+                                filename = f"{timestamp}_image_{len(downloaded)+1}.png"
+                                filepath = output_dir / filename
+                                filepath.write_bytes(response.body())
+                                downloaded.append(filepath)
+                                print(f"  Saved: {filename}")
+                        except Exception as e:
+                            print(f"  Failed to download URL: {e}")
                     
+                except Exception as e:
+                    continue
         except Exception:
             continue
+    
+    # Fallback: try canvas elements
+    if not downloaded:
+        try:
+            canvases = page.query_selector_all("canvas")
+            for i, canvas in enumerate(canvases):
+                try:
+                    size = page.evaluate("""
+                        (el) => ({
+                            width: el.width || 0,
+                            height: el.height || 0
+                        })
+                    """, canvas)
+                    
+                    if size['width'] < 300 or size['height'] < 300:
+                        continue
+                    
+                    img_data = page.evaluate("""
+                        (el) => el.toDataURL('image/png')
+                    """, canvas)
+                    
+                    import base64
+                    header, data = img_data.split(',', 1)
+                    img_bytes = base64.b64decode(data)
+                    
+                    filename = f"{timestamp}_canvas_{len(downloaded)+1}.png"
+                    filepath = output_dir / filename
+                    filepath.write_bytes(img_bytes)
+                    downloaded.append(filepath)
+                    print(f"  Saved canvas: {filename}")
+                except Exception:
+                    continue
+        except Exception:
+            pass
     
     return downloaded
 
@@ -474,6 +578,9 @@ def generate_image(prompt, output_dir=None, model="max", timeout=120, headless=T
             page.goto(ARENA_URL, wait_until="domcontentloaded")
             time.sleep(3)
             
+            # Activate image mode
+            activate_image_mode(page)
+            
             # Handle CAPTCHA if detected
             if CAPTCHA_HANDLER_AVAILABLE:
                 if not handle_captcha(page, timeout=60):
@@ -538,6 +645,54 @@ def generate_image(prompt, output_dir=None, model="max", timeout=120, headless=T
             context.close()
 
 
+def generate_with_retry(prompt, output_dir, model="max", timeout=180, headless=True, vote_mode="skip", max_retries=3):
+    """Try generation with retries and verify real images."""
+    for attempt in range(max_retries):
+        print(f"\n{'='*40}")
+        print(f"  ATTEMPT {attempt + 1}/{max_retries}")
+        print(f"{'='*40}")
+        
+        downloaded = generate_image(
+            prompt=prompt,
+            output_dir=output_dir,
+            model=model,
+            timeout=timeout,
+            headless=headless,
+            vote_mode=vote_mode
+        )
+        
+        if downloaded:
+            # Verify images are real (>300px)
+            real_images = []
+            for img_path in downloaded:
+                try:
+                    from PIL import Image
+                    img = Image.open(img_path)
+                    if img.width > 300 and img.height > 300:
+                        real_images.append(img_path)
+                        print(f"  Verified: {img_path.name} ({img.width}x{img.height})")
+                except ImportError:
+                    # No PIL - check file size (>10KB = likely real image)
+                    if img_path.stat().st_size > 10000:
+                        real_images.append(img_path)
+                except Exception:
+                    continue
+            
+            if real_images:
+                print(f"\n  SUCCESS! {len(real_images)} real image(s) generated")
+                return real_images
+            else:
+                print(f"  No real images found, retrying...")
+        
+        if attempt < max_retries - 1:
+            wait_time = 5 * (attempt + 1)  # 5s, 10s
+            print(f"  Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+    
+    print(f"\n  FAILED after {max_retries} attempts")
+    return []
+
+
 def main():
     parser = argparse.ArgumentParser(description="Arena.ai Image Generation")
     parser.add_argument("prompt", nargs="?", help="Image generation prompt (optional with --check-auth)")
@@ -574,14 +729,15 @@ def main():
     
     print_header()
     
-    # Generate image
-    downloaded = generate_image(
+    # Generate image with retries
+    downloaded = generate_with_retry(
         prompt=args.prompt,
         output_dir=args.output,
         model=args.model,
         timeout=args.timeout,
         headless=not args.headed,
-        vote_mode=args.vote
+        vote_mode=args.vote,
+        max_retries=3
     )
     
     if downloaded:
