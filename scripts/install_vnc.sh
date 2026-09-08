@@ -173,32 +173,84 @@ install_project_deps() {
 create_vnc_scripts() {
     print_step "Creating VNC management scripts..."
     
-    # Start VNC script
+    # Start VNC script (WITH Chrome auto-launch)
     cat > /root/.hermes/skills/arena-image-gen/scripts/start_vnc.sh << 'EOF'
 #!/bin/bash
-# Start VNC services for Arena.ai login
+# Start VNC services + Chrome for Arena.ai login
+
+echo "============================================"
+echo "  Starting VNC Services + Chrome..."
+echo "============================================"
 
 # Kill any existing instances
 pkill -f "Xvfb :99" 2>/dev/null || true
 pkill -f "x11vnc" 2>/dev/null || true
 pkill -f "websockify" 2>/dev/null || true
+pkill -f "chrome.*arena" 2>/dev/null || true
 
 sleep 1
 
 # Start virtual display
+echo "[1/4] Starting Xvfb (virtual display)..."
 Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
 sleep 2
 
 # Start VNC server (LOCALHOST ONLY - no public exposure)
+echo "[2/4] Starting x11vnc (VNC server)..."
 x11vnc -display :99 -nopw -listen 127.0.0.1 -forever -shared &
 sleep 1
 
 # Start noVNC (LOCALHOST ONLY)
+echo "[3/4] Starting noVNC (HTML5 VNC client)..."
 websockify --web /usr/share/novnc 6080 localhost:5900 &
 sleep 1
 
+# Launch Chrome in the virtual display
+echo "[4/4] Launching Chrome..."
+export DISPLAY=:99
+
+# Find Chrome binary
+CHROME_BIN=""
+if [ -f "/usr/bin/google-chrome" ]; then
+    CHROME_BIN="/usr/bin/google-chrome"
+elif [ -f "/usr/bin/google-chrome-stable" ]; then
+    CHROME_BIN="/usr/bin/google-chrome-stable"
+elif [ -f "/usr/bin/chromium-browser" ]; then
+    CHROME_BIN="/usr/bin/chromium-browser"
+elif [ -f "/usr/bin/chromium" ]; then
+    CHROME_BIN="/usr/bin/chromium"
+fi
+
+if [ -n "$CHROME_BIN" ]; then
+    # Launch Chrome with arena.ai
+    $CHROME_BIN \
+        --no-sandbox \
+        --disable-gpu \
+        --disable-dev-shm-usage \
+        --window-size=1280,800 \
+        --disable-blink-features=AutomationControlled \
+        --user-data-dir=$HOME/.arena-chrome-profile \
+        "https://arena.ai" &
+    
+    CHROME_PID=$!
+    sleep 3
+    
+    # Check if Chrome launched successfully
+    if ps -p $CHROME_PID > /dev/null 2>&1; then
+        echo "  Chrome launched successfully (PID: $CHROME_PID)"
+    else
+        echo "  WARNING: Chrome may have failed to launch"
+        echo "  Try running manually: python3 arena_login.py"
+    fi
+else
+    echo "  WARNING: Chrome not found!"
+    echo "  Install Chrome first: bash install_vnc.sh"
+    echo "  Or run manually: python3 arena_login.py"
+fi
+
+echo ""
 echo "============================================"
-echo "  VNC Services Started!"
+echo "  VNC + Chrome Started!"
 echo "============================================"
 echo ""
 echo "Access via SSH tunnel (from your phone/laptop):"
@@ -207,25 +259,65 @@ echo ""
 echo "Then open in browser:"
 echo "  http://localhost:6080/vnc.html"
 echo ""
+echo "You should see Chrome with arena.ai loaded."
+echo "Login with Google, then tell me to stop VNC."
+echo ""
 echo "To stop VNC: bash /root/.hermes/skills/arena-image-gen/scripts/stop_vnc.sh"
 echo "============================================"
 EOF
     
-    # Stop VNC script
+    # Stop VNC script (WITH profile save)
     cat > /root/.hermes/skills/arena-image-gen/scripts/stop_vnc.sh << 'EOF'
 #!/bin/bash
-# Stop VNC services
+# Stop VNC services and save Chrome profile
 
-echo "Stopping VNC services..."
+echo "============================================"
+echo "  Stopping VNC + Chrome..."
+echo "============================================"
 
-pkill -f "Xvfb :99" 2>/dev/null
-pkill -f "x11vnc" 2>/dev/null
-pkill -f "websockify" 2>/dev/null
+# Save Chrome profile before killing
+echo "[1/3] Saving Chrome profile..."
+PROFILE_SRC="/tmp/.org.chromium.Chromium.*"
+PROFILE_DST="$HOME/.arena-chrome-profile"
+
+# Try to copy any temp Chrome profiles
+for src in /tmp/.org.chromium.Chromium.* /tmp/chrome-vnc-*; do
+    if [ -d "$src" ]; then
+        cp -r "$src"/* "$PROFILE_DST/" 2>/dev/null || true
+        echo "  Saved profile from: $src"
+    fi
+done
+
+# Also copy from Chrome's default temp location
+if [ -d "/tmp/.org.chromium.Chromium.*/Default" ]; then
+    mkdir -p "$PROFILE_DST/Default"
+    cp -r /tmp/.org.chromium.Chromium.*/Default/* "$PROFILE_DST/Default/" 2>/dev/null || true
+fi
+
+echo "[2/3] Stopping services..."
+pkill -f "chrome.*arena" 2>/dev/null || true
+pkill -f "Xvfb :99" 2>/dev/null || true
+pkill -f "x11vnc" 2>/dev/null || true
+pkill -f "websockify" 2>/dev/null || true
 
 sleep 1
 
-echo "VNC services stopped."
-echo "Port 6080 is now free."
+echo "[3/3] Verifying profile saved..."
+if [ -d "$PROFILE_DST" ] && [ "$(ls -A $PROFILE_DST 2>/dev/null)" ]; then
+    echo "  Profile saved: $PROFILE_DST"
+else
+    echo "  WARNING: Profile may not have saved"
+    echo "  Run arena_login.py to re-login if needed"
+fi
+
+echo ""
+echo "============================================"
+echo "  VNC + Chrome Stopped!"
+echo "============================================"
+echo ""
+echo "Profile saved at: $PROFILE_DST"
+echo "You can now generate images headlessly."
+echo "============================================"
 EOF
     
     # Make scripts executable
