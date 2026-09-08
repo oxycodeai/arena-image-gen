@@ -1,0 +1,8 @@
+# Arena Image Generation - Dependencies
+# Python 3.11+ required
+
+# Browser automation
+playwright>=1.40.0
+
+# No other dependencies needed!
+# Playwright handles everything else.
