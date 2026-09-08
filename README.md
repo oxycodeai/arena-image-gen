@@ -87,6 +87,76 @@ use image gen skill and create sunset over ocean with gpt-image-1.5-high-fidelit
 use image gen skill and create abstract art and save to ~/my-art/
 ```
 
+## ⏱️ TIMING: No Fixed Time!
+
+**IMPORTANT:** Image generation has NO fixed time limit.
+
+| Stage | Time |
+|-------|------|
+| Chrome launch | 3-5 seconds |
+| Page load | 3-5 seconds |
+| Prompt entry | 1-2 seconds |
+| **Image generation** | **30 seconds to 3+ minutes** |
+| Download | 2-5 seconds |
+| **Total** | **40 seconds to 5 minutes** |
+
+**What to tell user:**
+- "Image generation started, this can take 30 seconds to 3+ minutes"
+- "No fixed time - depends on arena.ai server load"
+- "I'll notify you when image is ready"
+
+**Don't say:** "Image will be ready in 30 seconds" (WRONG - no guarantee)
+
+## 🔍 VERIFICATION: How to Confirm Image Generated
+
+Since image generation happens in headless mode, user can't see it. Use these methods:
+
+### Method 1: Check Output Files
+```bash
+ls -la ~/arena-output/
+```
+Look for PNG files > 10KB (real images are 100KB-5MB)
+
+### Method 2: Check File Size
+```bash
+file ~/arena-output/*.png
+```
+Should show: `PNG image data, 1024 1024, 8-bit/color RGBA`
+
+### Method 3: Download and View
+Tell user to download the file and open it:
+```bash
+# On VPS
+ls -la ~/arena-output/
+
+# Download to local machine
+scp user@VPS_IP:~/arena-output/*.png ./
+```
+
+### Method 4: F12 Check (If using headed mode)
+If using `--headed` flag:
+1. Right-click on generated image
+2. Select "Inspect" or press F12
+3. Check element shows `<img>` tag with blob: URL
+4. Image dimensions should be >300x300px
+
+### What SUCCESS Looks Like
+```
+✅ File exists: ~/arena-output/20260908_123456_image_1.png
+✅ File size: 245KB (real images are 100KB-5MB)
+✅ Image type: PNG image data, 1024 1024, 8-bit/color RGBA
+✅ No "21x21" or tiny dimensions
+```
+
+### What FAILURE Looks Like
+```
+❌ No files in ~/arena-output/
+❌ File size < 10KB (loading indicator, not real image)
+❌ Image dimensions 21x21 or 64x64 (loading indicator)
+❌ Script error: "Something went wrong"
+❌ Script error: "Generation timeout"
+```
+
 ## 🏆 Best Models
 
 | Model | Quality | Best For |
@@ -98,6 +168,41 @@ use image gen skill and create abstract art and save to ~/my-art/
 | `gemini-2.0-flash-preview` | 5th | Quick drafts |
 
 Use `--model max` for auto-selection (default).
+
+## ⚠️ ERRORS & TROUBLESHOOTING
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `No saved session found` | Login not done | Run setup steps above |
+| `CAPTCHA not solved` | Anti-bot detected | Run `start_vnc.sh`, solve manually |
+| `Generation timeout` | Too slow/taking long | Increase `--timeout 300` |
+| `No images downloaded` | UI changed/wrong URL | Check arena.ai, selectors may need update |
+| `21x21 image saved` | Loading indicator caught | Now fixed with 300px filter |
+| `Something went wrong` | Arena.ai error | Retry with `--timeout 300` |
+| `Image mode not activated` | Button click failed | Script continues anyway |
+
+### If Generation Fails
+
+1. **First attempt fails** → Script automatically retries (3 attempts)
+2. **All 3 fail** → Check:
+   - Is session still valid? `python3 arena_gen.py --check-auth`
+   - Is arena.ai working? Open in browser manually
+   - Try `--headed` mode to see what's happening
+3. **Still fails** → May need to re-login:
+   ```bash
+   bash ~/.hermes/skills/arena-image-gen/scripts/start_vnc.sh
+   # User re-login via VNC
+   bash ~/.hermes/skills/arena-image-gen/scripts/stop_vnc.sh
+   ```
+
+### If Image is Small/Loading Indicator
+
+Script now filters images >300px only. If you see:
+- 21x21 pixels → Loading indicator (skipped by script)
+- 64x64 pixels → Avatar/icon (skipped by script)
+- 1024x1024+ → Real image ✅
 
 ## 🛡️ Security Features
 
@@ -127,16 +232,6 @@ arena-image-gen/
 ├── README.md               # This file
 └── .gitignore              # Git ignores
 ```
-
-## 🔧 Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| CAPTCHA appears | Solve via VNC (auto-detected) |
-| Voting required | Use `--vote skip` or `--vote auto` |
-| Session expired | Run: `python3 arena_login.py` |
-| VNC not visible | Check SSH tunnel |
-| No images generated | Check auth: `arena_gen.py --check-auth` |
 
 ## 📝 License
 
