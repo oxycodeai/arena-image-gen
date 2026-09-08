@@ -144,5 +144,13 @@ MIT
 
 ## 🙏 Credits
 
-Built for Hermes agent platform.
+Built by **OXYCODE** for Hermes agent platform.
 Uses Arena.ai for model routing.
+
+### Connect with us:
+
+| Platform | Link |
+|----------|------|
+| Telegram | [t.me/OXYCODEAI](https://t.me/OXYCODEAI) |
+| Instagram | [@oxycode.ai](https://instagram.com/oxycode.ai) |
+| GitHub | [oxycodeai](https://github.com/oxycodeai) |

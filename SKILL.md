@@ -2,7 +2,7 @@
 name: arena-image-gen
 description: Generate images using Arena.ai's best AI models via VNC login + persistent Chrome profile. Includes stealth browser, CAPTCHA handling, and voting support.
 version: 3.0.0
-author: Hermes
+author: OXYCODE
 license: MIT
 platforms: [linux]
 metadata:
@@ -222,3 +222,13 @@ FUTURE USE:
 | **CAPTCHA appears** | Anti-bot detection | Stealth helps; solve via VNC if triggered |
 | **Voting required** | Battle Mode default | Use `--vote skip` or `--vote auto` |
 | **2 images generated** | Battle Mode behavior | Normal; both images downloaded |
+
+## Credits
+
+Built by **OXYCODE** for Hermes agent platform.
+
+| Platform | Link |
+|----------|------|
+| Telegram | [t.me/OXYCODEAI](https://t.me/OXYCODEAI) |
+| Instagram | [@oxycode.ai](https://instagram.com/oxycode.ai) |
+| GitHub | [oxycodeai](https://github.com/oxycodeai) |
